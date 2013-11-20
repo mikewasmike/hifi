@@ -356,7 +356,7 @@ private:
     int _mouseY;
     int _mouseDragStartedX;
     int _mouseDragStartedY;
-	int _gestureDirection;
+    int _gestureDirection;
     uint64_t _lastMouseMove;
     bool _mouseHidden;
     bool _seenMouseMove;
@@ -378,9 +378,9 @@ private:
     bool _isHoverVoxel;
     bool _isHoverVoxelSounding;
     nodeColor _hoverVoxelOriginalColor;
-	BoxFace _clickedFace;
-	bool _gestureStartPosSet;
-	glm::vec3 _originalPoint;
+    BoxFace _clickedFace;
+    bool _gestureStartPosSet;
+    glm::vec3 _originalPoint;
     
     VoxelDetail _mouseVoxel;      // details of the voxel to be edited
     float _mouseVoxelScale;       // the scale for adding/removing voxels
