@@ -2202,7 +2202,6 @@ void Application::updateMouseVoxels(float deltaTime, glm::vec3& mouseRayOrigin, 
         }    
         glm::vec3 faceVector = getFaceVector(_clickedFace);
         if (_gestureDirection == LEFT_DRAG_STARTED) { //add voxel by guesture
-                //printf("Hover Voxel Scale: %f \r\n", _hoverVoxel.s);
                 if (!_gestureStartPosSet && distance < MAX_VOXEL_EDIT_DISTANCE) {
                     glm::vec3 pt = (mouseRayOrigin + mouseRayDirection * distance) / (float)TREE_SCALE -
                     faceVector * (_mouseVoxelScale * 0.5f);
@@ -4059,7 +4058,6 @@ bool Application::maybeEditVoxelUnderCursor() {
     if (Menu::getInstance()->isOptionChecked(MenuOption::VoxelAddMode)
         || Menu::getInstance()->isOptionChecked(MenuOption::VoxelColorMode) 
         || (_gestureDirection == LEFT_DRAG_STARTED && !_mousePressed)) {
-        printf("Voxel gonna b created now, scale: %f \r\n", _mouseVoxel.s);
         if (_mouseVoxel.s != 0) {
             PACKET_TYPE message = Menu::getInstance()->isOptionChecked(MenuOption::DestructiveAddVoxel)
                 ? PACKET_TYPE_SET_VOXEL_DESTRUCTIVE
