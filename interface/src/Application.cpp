@@ -1103,12 +1103,20 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
 
         // detect drag
         glm::vec3 mouseVoxelPos(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
+        //printf("\r\nParams %f %f %i \r\n",_mouseVoxel.x, _lastMouseVoxelPos.x, _justEditedVoxel);
         if (!_justEditedVoxel && mouseVoxelPos != _lastMouseVoxelPos) {
             if (event->buttons().testFlag(Qt::LeftButton)) {
+                maybeEditVoxelUnderCursor();
+            } else if (event->buttons().testFlag(Qt::RightButton) && Menu::getInstance()->isVoxelModeActionChecked()) {
+                deleteVoxelUnderCursor();
+            }
+        }
+        if (event->buttons().testFlag(Qt::LeftButton)) {
                 //The first direction that the drag moves is the determining direction
                 //GESTURE_THRESHOLD -ensure that the drag is not accidental
                 if(_mouseX + GESTURE_THRESHOLD < _mouseDragStartedX && _gestureDirection != DOWN_DRAG_STARTED) {
                     _gestureDirection = LEFT_DRAG_STARTED;
+                    printf("Left Started....");
                 } else if (_mouseX - GESTURE_THRESHOLD > _mouseDragStartedX && _gestureDirection != DOWN_DRAG_STARTED) {
                     _gestureDirection = RIGHT_DRAG_STARTED;
                 } else if (_mouseY - GESTURE_THRESHOLD > _mouseDragStartedY) {
@@ -1116,11 +1124,6 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
                 } else {
                     _gestureDirection = NEUTRAL;
                 }
-                
-                maybeEditVoxelUnderCursor();
-            } else if (event->buttons().testFlag(Qt::RightButton) && Menu::getInstance()->isVoxelModeActionChecked()) {
-                deleteVoxelUnderCursor();
-            }
         }
 
         _pieMenu.mouseMoveEvent(_mouseX, _mouseY);
@@ -1140,6 +1143,7 @@ void Application::mousePressEvent(QMouseEvent* event) {
             _mouseDragStartedX = _mouseX;
             _mouseDragStartedY = _mouseY;
             _gestureStartPosSet = false;
+            _gestureDirection = NEUTRAL;
             _mouseVoxelDragging = _mouseVoxel;
             _mousePressed = true;
             maybeEditVoxelUnderCursor();
@@ -1199,6 +1203,7 @@ void Application::mousePressEvent(QMouseEvent* event) {
 }
 
 void Application::mouseReleaseEvent(QMouseEvent* event) {
+    printf("Released %i\r\n", _gestureDirection);
     if (activeWindow() == _window) {
         if (event->button() == Qt::LeftButton) {
             _mouseX = event->x();
@@ -1206,6 +1211,7 @@ void Application::mouseReleaseEvent(QMouseEvent* event) {
             _mousePressed = false;
             checkBandwidthMeterClick();
             if (_gestureDirection != NEUTRAL) {
+                printf("Edit \r\n");
                 maybeEditVoxelUnderCursor();
                 _gestureDirection = NEUTRAL;
             }
@@ -2247,8 +2253,13 @@ void Application::updateMouseVoxels(float deltaTime, glm::vec3& mouseRayOrigin, 
                 _mouseVoxel.green = 0;
                 _mouseVoxel.blue = 0;
         }
-        //Down has now mouseVoxel Effects
+        //Down has no mouseVoxel Effects
         _gestureStartPosSet = true;
+        // if we just edited, use the currently selected voxel as the "last" for drag detection
+        if (_justEditedVoxel) {
+            _lastMouseVoxelPos = glm::vec3(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
+            _justEditedVoxel = false;
+        }
     }    
 }
 
