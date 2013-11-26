@@ -127,10 +127,11 @@ Application::Application(int& argc, char** argv, timeval &startup_time) :
         _pitchFromTouch(0.0f),
         _mousePressed(false),
         _gestureDirection(NEUTRAL),
-        //_clickedFace(-1),
+        _clickedFaceSet(false),
         _isHoverVoxel(false),
         _isHoverVoxelSounding(false),
         _mouseVoxelScale(1.0f / 1024.0f),
+        _newMouseVoxelScale(0.0f),
         _mouseVoxelScaleInitialized(false),
         _justEditedVoxel(false),
         _nudgeStarted(false),
@@ -1106,7 +1107,7 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
 
         // detect drag
         glm::vec3 mouseVoxelPos(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
-        //printf("\r\nParams %f %f %i \r\n",_mouseVoxel.x, _lastMouseVoxelPos.x, _justEditedVoxel);
+
         if (!_justEditedVoxel && mouseVoxelPos != _lastMouseVoxelPos) {
             if (event->buttons().testFlag(Qt::LeftButton)) {
                 maybeEditVoxelUnderCursor();
@@ -1114,12 +1115,13 @@ void Application::mouseMoveEvent(QMouseEvent* event) {
                 deleteVoxelUnderCursor();
             }
         }
+        //printf("\r\nParams %f %f %i \r\n",_mouseVoxel.x, _lastMouseVoxelPos.x, _justEditedVoxel);
         if (event->buttons().testFlag(Qt::LeftButton)) {
                 //The first direction that the drag moves is the determining direction
                 //GESTURE_THRESHOLD -ensure that the drag is not accidental
                 if(_mouseX + GESTURE_THRESHOLD < _mouseDragStartedX && _gestureDirection != DOWN_DRAG_STARTED) {
                     _gestureDirection = LEFT_DRAG_STARTED;
-                    printf("Left draging.... \r\n");
+                    //printf("Left draging.... \r\n");
                 } else if (_mouseX - GESTURE_THRESHOLD > _mouseDragStartedX && _gestureDirection != DOWN_DRAG_STARTED) {
                     _gestureDirection = RIGHT_DRAG_STARTED;
                 } else if (_mouseY - GESTURE_THRESHOLD > _mouseDragStartedY) {
@@ -1198,7 +1200,6 @@ void Application::mousePressEvent(QMouseEvent* event) {
                     _myAvatar.setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
                 }
             }
-            
         } else if (event->button() == Qt::RightButton && Menu::getInstance()->isVoxelModeActionChecked()) {
             deleteVoxelUnderCursor();
         }
@@ -1212,10 +1213,12 @@ void Application::mouseReleaseEvent(QMouseEvent* event) {
             _mouseX = event->x();
             _mouseY = event->y();
             _mousePressed = false;
+            _clickedFaceSet = false;
             checkBandwidthMeterClick();
             if (_gestureDirection != NEUTRAL) {
                 printf("Edit after release mouse \r\n");
                 maybeEditVoxelUnderCursor();
+                _gestureDirection = NEUTRAL;
             }
             _pieMenu.mouseReleaseEvent(_mouseX, _mouseY);
         }
@@ -2204,47 +2207,49 @@ void Application::updateMouseVoxels(float deltaTime, glm::vec3& mouseRayOrigin, 
             _justEditedVoxel = false;
         }
     }
-    
+
+	
     //Gesture Editing
     if (_gestureDirection != NEUTRAL) {
-        if (!_gestureStartPosSet && _voxels.findRayIntersection(mouseRayOrigin, mouseRayDirection, _hoverVoxel, distance, face)) {
-            _clickedFace = face;
-            _mouseVoxelScale = _hoverVoxel.s * GESTURE_START_FACTOR;
-        }    
+		if (!_clickedFaceSet && _voxels.findRayIntersection(mouseRayOrigin, mouseRayDirection, _mouseVoxelDragging, distance, face)) {
+			_clickedFace = face;
+		}		 
+        _mouseVoxelScale = _mouseVoxelDragging.s * GESTURE_START_FACTOR; 
         glm::vec3 faceVector = getFaceVector(_clickedFace);
         if (_gestureDirection == LEFT_DRAG_STARTED) { //add voxel by gesture
-                if (!_gestureStartPosSet && distance < MAX_VOXEL_EDIT_DISTANCE) {
+                if (!_clickedFaceSet) {
                     glm::vec3 pt = (mouseRayOrigin + mouseRayDirection * distance) / (float)TREE_SCALE -
                     faceVector * (_mouseVoxelScale * 0.5f);
                     _mouseVoxel.x = _mouseVoxelScale * floorf(pt.x / _mouseVoxelScale) + faceVector.x * _mouseVoxelScale;
                     _mouseVoxel.y = _mouseVoxelScale * floorf(pt.y / _mouseVoxelScale) + faceVector.y * _mouseVoxelScale;
                     _mouseVoxel.z = _mouseVoxelScale * floorf(pt.z / _mouseVoxelScale) +  faceVector.z * _mouseVoxelScale;
-                    _mouseVoxel.s = _mouseVoxelScale;
-                    _originalPoint = glm::vec3(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z); 
-                } else if (_gestureStartPosSet && _mouseVoxelScale <= (2.f * _hoverVoxel.s)) {
-                    _mouseVoxelScale = _hoverVoxel.s * GESTURE_START_FACTOR + _hoverVoxel.s * (_mouseDragStartedX - _mouseX ) * 0.003f;
-                    if (_clickedFace == MIN_X_FACE || _clickedFace == MIN_Y_FACE || _clickedFace == MIN_Z_FACE) {
+                    _originalPoint = glm::vec3(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
+                    _clickedFaceSet = true;
+                } else {
+                    _mouseVoxelScale =  _mouseVoxelDragging.s * GESTURE_START_FACTOR *  pow(2, floor((_mouseDragStartedX - _mouseX ) / GESTURE_THRESHOLD));
+                    if (_mouseVoxelScale / _mouseVoxelDragging.s <= GESTURE_MAX_FACTOR && (_clickedFace == MIN_X_FACE || _clickedFace == MIN_Y_FACE || _clickedFace == MIN_Z_FACE)) {
                         printf("Odd Faces\r\n");
-                        _mouseVoxel.x = _originalPoint.x + faceVector.x * (_mouseVoxelScale - _hoverVoxel.s * GESTURE_START_FACTOR);
-						_mouseVoxel.y = _originalPoint.y + faceVector.y * (_mouseVoxelScale - _hoverVoxel.s * GESTURE_START_FACTOR);
-						_mouseVoxel.z = _originalPoint.z + faceVector.z * (_mouseVoxelScale - _hoverVoxel.s * GESTURE_START_FACTOR);
+                        _mouseVoxel.x = _originalPoint.x + faceVector.x * (_mouseVoxelScale - _mouseVoxelDragging.s * GESTURE_START_FACTOR);
+						_mouseVoxel.y = _originalPoint.y + faceVector.y * (_mouseVoxelScale - _mouseVoxelDragging.s * GESTURE_START_FACTOR);
+						_mouseVoxel.z = _originalPoint.z + faceVector.z * (_mouseVoxelScale - _mouseVoxelDragging.s * GESTURE_START_FACTOR);
                     }
-                    _mouseVoxel.s = _mouseVoxelScale;
-                } else if (_gestureStartPosSet) {
-                    _mouseVoxelScale = _hoverVoxel.s * GESTURE_START_FACTOR + _hoverVoxel.s * (_mouseDragStartedX - _mouseX ) * 0.001f;
-                    _mouseVoxel.s = (GESTURE_MAX_FACTOR * _hoverVoxel.s);
                 }
-                _mouseVoxel.red = _hoverVoxel.red;
-                _mouseVoxel.green = _hoverVoxel.green;
-                _mouseVoxel.blue = _hoverVoxel.blue;
-        } else if (_gestureDirection == RIGHT_DRAG_STARTED) {
+                if (_mouseVoxelScale / _mouseVoxelDragging.s > GESTURE_MAX_FACTOR) {
+                    _mouseVoxel.s = (GESTURE_MAX_FACTOR * _mouseVoxelDragging.s);
+                } else {
+					_mouseVoxel.s = _mouseVoxelScale;
+				}
+                _mouseVoxel.red = _mouseVoxelDragging.red;
+                _mouseVoxel.green = _mouseVoxelDragging.green;
+                _mouseVoxel.blue = _mouseVoxelDragging.blue;
+                
+        } else if (_gestureDirection == RIGHT_DRAG_STARTED) { //delete sub voxel
                 if (!_gestureStartPosSet && distance < MAX_VOXEL_EDIT_DISTANCE) {
                     glm::vec3 pt = (mouseRayOrigin + mouseRayDirection * distance) / (float)TREE_SCALE -
                     faceVector * (_mouseVoxelScale * 0.5f);
                     _mouseVoxel.x = _mouseVoxelScale * floorf(pt.x / _mouseVoxelScale);
                     _mouseVoxel.y = _mouseVoxelScale * floorf(pt.y / _mouseVoxelScale);
                     _mouseVoxel.z = _mouseVoxelScale * floorf(pt.z / _mouseVoxelScale);
-                    _mouseVoxel.s = _mouseVoxelScale;
                     _originalPoint = glm::vec3(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z); 
                 } else if (_gestureStartPosSet) {
                     _mouseVoxelScale = _hoverVoxel.s * 0.125f + _mouseVoxelScale * (_mouseX - _mouseDragStartedX) * 0.004f;
@@ -2253,14 +2258,12 @@ void Application::updateMouseVoxels(float deltaTime, glm::vec3& mouseRayOrigin, 
                         _mouseVoxel.y = _originalPoint.y - faceVector.y * (_mouseVoxelScale - _hoverVoxel.s * 0.125f);
                         _mouseVoxel.z = _originalPoint.z - faceVector.z * (_mouseVoxelScale - _hoverVoxel.s * 0.125f);
                     }
-                    _mouseVoxel.s = _mouseVoxelScale;
                 }
                 _mouseVoxel.red = 255;
                 _mouseVoxel.green = 0;
                 _mouseVoxel.blue = 0;
+                _mouseVoxel.s = _mouseVoxelScale;
         }
-        //Down has no mouseVoxel Effects
-        _gestureStartPosSet = true;
         printf("Mouse Voxel %f, %f, %f \r\n", _mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
     }    
 }
@@ -4076,7 +4079,7 @@ bool Application::maybeEditVoxelUnderCursor() {
                 ? PACKET_TYPE_SET_VOXEL_DESTRUCTIVE
                 : PACKET_TYPE_SET_VOXEL;
             _voxelEditSender.sendVoxelEditMessage(message, _mouseVoxel);
-            printf("To be created: %f, %f, %f \r\n", _mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z);
+            printf("To be created: %f, %f, %f ... Scale: %f \r\n", _mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z, (_mouseVoxel.s/_mouseVoxelDragging.s));
             // create the voxel locally so it appears immediately
             if (_clickedFace == MIN_X_FACE || _clickedFace == MIN_Y_FACE || _clickedFace == MIN_Z_FACE) {
 				_voxels.createVoxel(_originalPoint.x, _originalPoint.y, _originalPoint.z, _mouseVoxel.s,
@@ -4104,7 +4107,6 @@ bool Application::maybeEditVoxelUnderCursor() {
             
             // remember the position for drag detection
             _justEditedVoxel = true;
-            _gestureDirection = NEUTRAL;
         }
     } else if (Menu::getInstance()->isOptionChecked(MenuOption::VoxelDeleteMode) 
                 || (_gestureDirection == RIGHT_DRAG_STARTED && !_mousePressed)) {
