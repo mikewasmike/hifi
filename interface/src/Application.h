@@ -379,7 +379,6 @@ private:
     bool _isHoverVoxelSounding;
     nodeColor _hoverVoxelOriginalColor;
     BoxFace _clickedFace;
-    bool _gestureStartPosSet;
     glm::vec3 _originalPoint;
     
     VoxelDetail _mouseVoxel;      // details of the voxel to be edited
