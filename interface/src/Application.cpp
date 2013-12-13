@@ -2219,9 +2219,10 @@ void Application::updateMouseVoxels(float deltaTime, glm::vec3& mouseRayOrigin, 
 			_mouseVoxelScale =  _originalScale * GESTURE_START_FACTOR *  pow(2, floor((abs(_mouseDragStartedX - _mouseX) - GESTURE_THRESHOLD) / GESTURE_THRESHOLD));
 
 
-			if (_mouseVoxelScale > _originalScale * GESTURE_MAX_FACTOR) {
+			if (_gestureDirection == LEFT_DRAG_STARTED && _mouseVoxelScale > _originalScale * GESTURE_MAX_FACTOR) {
 				_mouseVoxelScale = _originalScale * GESTURE_MAX_FACTOR;
-				
+			} else if (_gestureDirection == RIGHT_DRAG_STARTED && _mouseVoxelScale > _originalScale) {
+				_mouseVoxelScale = _originalScale;
 			}
 
 			glm::vec3 faceVector = getFaceVector(_clickedFace);
