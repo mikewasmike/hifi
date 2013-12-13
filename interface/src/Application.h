@@ -380,9 +380,11 @@ private:
     nodeColor _hoverVoxelOriginalColor;
     BoxFace _clickedFace;
     glm::vec3 _originalPoint;
+    glm::vec3 _gestureCenterVector;
     
     VoxelDetail _mouseVoxel;      // details of the voxel to be edited
     float _mouseVoxelScale;       // the scale for adding/removing voxels
+    float _originalScale;
     bool _mouseVoxelScaleInitialized;
     bool _clickedFaceSet;
     glm::vec3 _lastMouseVoxelPos; // the position of the last mouse voxel edit
