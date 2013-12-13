@@ -1215,7 +1215,14 @@ void Application::mouseReleaseEvent(QMouseEvent* event) {
             _mousePressed = false;
             checkBandwidthMeterClick();
             if (_gestureDirection != NEUTRAL) {
-                maybeEditVoxelUnderCursor();
+				if (_gestureDirection == DOWN_DRAG_STARTED) {
+					const float PERCENTAGE_TO_MOVE_TOWARD = 0.90f;
+					glm::vec3 newTarget = getMouseVoxelWorldCoordinates(_mouseVoxelDragging);
+					glm::vec3 myPosition = _myAvatar.getPosition();
+					_myAvatar.setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
+				} else {
+				  maybeEditVoxelUnderCursor();
+				}  
                 _gestureDirection = NEUTRAL;
             }
             _pieMenu.mouseReleaseEvent(_mouseX, _mouseY);
@@ -4072,7 +4079,7 @@ bool Application::maybeEditVoxelUnderCursor() {
                 ? PACKET_TYPE_SET_VOXEL_DESTRUCTIVE
                 : PACKET_TYPE_SET_VOXEL;
             _voxelEditSender.sendVoxelEditMessage(message, _mouseVoxel);
-            printf("To be created: %f, %f, %f ... Scale: %f \r\n", _mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z, (_mouseVoxel.s/_mouseVoxelDragging.s));
+            
             // create the voxel locally so it appears immediately
 
 			_voxels.createVoxel(_mouseVoxel.x, _mouseVoxel.y, _mouseVoxel.z, _mouseVoxel.s,
@@ -4110,11 +4117,6 @@ bool Application::maybeEditVoxelUnderCursor() {
         
     } else if (Menu::getInstance()->isOptionChecked(MenuOption::VoxelGetColorMode)) {
         eyedropperVoxelUnderCursor();
-    } else if (_gestureDirection == DOWN_DRAG_STARTED && !_mousePressed) {
-        const float PERCENTAGE_TO_MOVE_TOWARD = 0.90f;
-        glm::vec3 newTarget = getMouseVoxelWorldCoordinates(_mouseVoxelDragging);
-        glm::vec3 myPosition = _myAvatar.getPosition();
-        _myAvatar.setMoveTarget(myPosition + (newTarget - myPosition) * PERCENTAGE_TO_MOVE_TOWARD);
     } else {
         return false;
     }
