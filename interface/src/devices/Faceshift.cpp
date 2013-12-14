@@ -10,6 +10,7 @@
 
 #include <SharedUtil.h>
 
+#include "Application.h"
 #include "Faceshift.h"
 #include "Menu.h"
 #include "Util.h"
@@ -89,6 +90,17 @@ void Faceshift::reset() {
         send(message);
     }
     _longTermAverageInitialized = false;
+}
+
+void Faceshift::updateFakeCoefficients(float leftBlink, float rightBlink, float browUp,
+        float jawOpen, std::vector<float>& coefficients) const {
+    coefficients.resize(max((int)coefficients.size(), _jawOpenIndex + 1));
+    coefficients[_leftBlinkIndex] = leftBlink;
+    coefficients[_rightBlinkIndex] = rightBlink;
+    coefficients[_browUpCenterIndex] = browUp;
+    coefficients[_browUpLeftIndex] = browUp;
+    coefficients[_browUpRightIndex] = browUp;
+    coefficients[_jawOpenIndex] = jawOpen;
 }
 
 void Faceshift::setTCPEnabled(bool enabled) {

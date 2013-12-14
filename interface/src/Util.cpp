@@ -224,6 +224,18 @@ glm::quat extractRotation(const glm::mat4& matrix, bool assumeOrthogonal) {
         0.5f * sqrtf(z2) * (upper[0][1] >= upper[1][0] ? 1.0f : -1.0f)));
 }
 
+glm::vec3 extractScale(const glm::mat4& matrix) {
+    return glm::vec3(glm::length(matrix[0]), glm::length(matrix[1]), glm::length(matrix[2]));
+}
+
+float extractUniformScale(const glm::mat4& matrix) {
+    return extractUniformScale(extractScale(matrix));
+}
+
+float extractUniformScale(const glm::vec3& scale) {
+    return (scale.x + scale.y + scale.z) / 3.0f;
+}
+
 //  Draw a 3D vector floating in space
 void drawVector(glm::vec3 * vector) {
     glDisable(GL_LIGHTING);
@@ -507,33 +519,6 @@ void renderNudgeGuide(float voxelX, float voxelY, float voxelZ, float voxelS) {
     glEnd();
 }
 
-void renderDiskShadow(glm::vec3 position, glm::vec3 upDirection, float radius, float darkness) {
-
-    glColor4f(0.0f, 0.0f, 0.0f, darkness);
-    
-    int   num = 20;
-    float y  = 0.001f;
-    float x2 = 0.0f;
-    float z2 = radius;
-    float x1;
-    float z1;
-
-    glBegin(GL_TRIANGLES);             
-
-    for (int i=1; i<num+1; i++) {
-        x1 = x2;
-        z1 = z2;
-        float r = ((float)i / (float)num) * PIf * 2.0;
-        x2 = radius * sin(r);
-        z2 = radius * cos(r);
-    
-            glVertex3f(position.x,      y, position.z     ); 
-            glVertex3f(position.x + x1, y, position.z + z1); 
-            glVertex3f(position.x + x2, y, position.z + z2); 
-    }
-    
-    glEnd();
-}
 
 
 

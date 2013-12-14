@@ -20,6 +20,7 @@
 
 #include <OctalCode.h>
 
+#include <GeometryUtil.h>
 #include <VoxelTree.h>
 
 #include "FBXReader.h"
@@ -581,6 +582,7 @@ class ExtractedMesh {
 public:
     FBXMesh mesh;
     QMultiHash<int, int> newIndices;
+    QVector<QHash<int, int> > blendshapeIndexMaps;
 };
 
 class MeshData {
@@ -779,7 +781,8 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
     QVector<QString> jointRightFingertipIDs(jointRightFingertipNames.size());
     
     QVariantHash blendshapeMappings = mapping.value("bs").toHash();
-    QHash<QByteArray, QPair<int, float> > blendshapeIndices;
+    typedef QPair<int, float> WeightedIndex;
+    QMultiHash<QByteArray, WeightedIndex> blendshapeIndices;
     for (int i = 0;; i++) {
         QByteArray blendshapeName = FACESHIFT_BLENDSHAPES[i];
         if (blendshapeName.isEmpty()) {
@@ -787,16 +790,16 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
         }
         QList<QVariant> mappings = blendshapeMappings.values(blendshapeName);
         if (mappings.isEmpty()) {
-            blendshapeIndices.insert(blendshapeName, QPair<int, float>(i, 1.0f));
+            blendshapeIndices.insert(blendshapeName, WeightedIndex(i, 1.0f));
         } else {
             foreach (const QVariant& mapping, mappings) {
                 QVariantList blendshapeMapping = mapping.toList();
                 blendshapeIndices.insert(blendshapeMapping.at(0).toByteArray(),
-                   QPair<int, float>(i, blendshapeMapping.at(1).toFloat()));
+                   WeightedIndex(i, blendshapeMapping.at(1).toFloat()));
             }
         }
     }
-    QHash<QString, QPair<int, float> > blendshapeChannelIndices;
+    QMultiHash<QString, WeightedIndex> blendshapeChannelIndices;
     
     foreach (const FBXNode& child, node.children) {
         if (child.name == "Objects") {
@@ -1032,7 +1035,10 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
                             // try everything after the dot
                             name = name.mid(name.lastIndexOf('.') + 1);
                         }
-                        blendshapeChannelIndices.insert(getID(object.properties), blendshapeIndices.value(name));
+                        QString id = getID(object.properties);
+                        foreach (const WeightedIndex& index, blendshapeIndices.values(name)) {
+                            blendshapeChannelIndices.insert(id, index);
+                        }
                     }
                 }
             }
@@ -1058,20 +1064,30 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
     // assign the blendshapes to their corresponding meshes
     foreach (const ExtractedBlendshape& extracted, blendshapes) {
         QString blendshapeChannelID = parentMap.value(extracted.id);
-        QPair<int, float> index = blendshapeChannelIndices.value(blendshapeChannelID);
         QString blendshapeID = parentMap.value(blendshapeChannelID);
         QString meshID = parentMap.value(blendshapeID);
         ExtractedMesh& extractedMesh = meshes[meshID];
-        extractedMesh.mesh.blendshapes.resize(max(extractedMesh.mesh.blendshapes.size(), index.first + 1));
-        FBXBlendshape& blendshape = extractedMesh.mesh.blendshapes[index.first];
-        for (int i = 0; i < extracted.blendshape.indices.size(); i++) {
-            int oldIndex = extracted.blendshape.indices.at(i);
-            for (QMultiHash<int, int>::const_iterator it = extractedMesh.newIndices.constFind(oldIndex);
-                    it != extractedMesh.newIndices.constEnd() && it.key() == oldIndex; it++) {
-                blendshape.indices.append(it.value());
-                blendshape.vertices.append(extracted.blendshape.vertices.at(i) * index.second);
-                blendshape.normals.append(extracted.blendshape.normals.at(i) * index.second);
-            } 
+        foreach (const WeightedIndex& index, blendshapeChannelIndices.values(blendshapeChannelID)) {
+            extractedMesh.mesh.blendshapes.resize(max(extractedMesh.mesh.blendshapes.size(), index.first + 1));
+            extractedMesh.blendshapeIndexMaps.resize(extractedMesh.mesh.blendshapes.size());
+            FBXBlendshape& blendshape = extractedMesh.mesh.blendshapes[index.first];
+            QHash<int, int>& blendshapeIndexMap = extractedMesh.blendshapeIndexMaps[index.first];
+            for (int i = 0; i < extracted.blendshape.indices.size(); i++) {
+                int oldIndex = extracted.blendshape.indices.at(i);
+                for (QMultiHash<int, int>::const_iterator it = extractedMesh.newIndices.constFind(oldIndex);
+                        it != extractedMesh.newIndices.constEnd() && it.key() == oldIndex; it++) {
+                    QHash<int, int>::iterator blendshapeIndex = blendshapeIndexMap.find(it.value());
+                    if (blendshapeIndex == blendshapeIndexMap.end()) {
+                        blendshapeIndexMap.insert(it.value(), blendshape.indices.size());
+                        blendshape.indices.append(it.value());
+                        blendshape.vertices.append(extracted.blendshape.vertices.at(i) * index.second);
+                        blendshape.normals.append(extracted.blendshape.normals.at(i) * index.second);
+                    } else {
+                        blendshape.vertices[*blendshapeIndex] += extracted.blendshape.vertices.at(i) * index.second;
+                        blendshape.normals[*blendshapeIndex] += extracted.blendshape.normals.at(i) * index.second;
+                    }
+                } 
+            }
         }
     }
     
@@ -1142,6 +1158,7 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
             joint.distanceToParent = glm::distance(extractTranslation(parentJoint.transform),
                 extractTranslation(joint.transform));
         }
+        joint.boneRadius = 0.0f;
         joint.inverseBindRotation = joint.inverseDefaultRotation;
         geometry.joints.append(joint);
         geometry.jointIndices.insert(model.name, geometry.joints.size() - 1);  
@@ -1274,7 +1291,9 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
         }
         
         // whether we're skinned depends on how many clusters are attached
-        int maxJointIndex = extracted.mesh.clusters.at(0).jointIndex;
+        const FBXCluster& firstFBXCluster = extracted.mesh.clusters.at(0);
+        int maxJointIndex = firstFBXCluster.jointIndex;
+        glm::mat4 inverseModelTransform = glm::inverse(modelTransform);
         if (clusterIDs.size() > 1) {
             extracted.mesh.clusterIndices.resize(extracted.mesh.vertices.size());
             extracted.mesh.clusterWeights.resize(extracted.mesh.vertices.size());
@@ -1282,6 +1301,21 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
             for (int i = 0; i < clusterIDs.size(); i++) {
                 QString clusterID = clusterIDs.at(i);
                 const Cluster& cluster = clusters[clusterID];
+                const FBXCluster& fbxCluster = extracted.mesh.clusters.at(i);
+                int jointIndex = fbxCluster.jointIndex;
+                FBXJoint& joint = geometry.joints[jointIndex];
+                glm::vec3 boneEnd = extractTranslation(inverseModelTransform * joint.bindTransform);
+                glm::vec3 boneDirection;
+                float boneLength;
+                if (joint.parentIndex != -1) {
+                    boneDirection = boneEnd - extractTranslation(inverseModelTransform *
+                        geometry.joints[joint.parentIndex].bindTransform);
+                    boneLength = glm::length(boneDirection);
+                    if (boneLength > EPSILON) {
+                        boneDirection /= boneLength;
+                    }
+                }
+                float radiusScale = extractUniformScale(joint.transform * fbxCluster.inverseBindMatrix);
                 float totalWeight = 0.0f;
                 for (int j = 0; j < cluster.indices.size(); j++) {
                     int oldIndex = cluster.indices.at(j);
@@ -1289,9 +1323,19 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
                     totalWeight += weight;
                     for (QMultiHash<int, int>::const_iterator it = extracted.newIndices.constFind(oldIndex);
                             it != extracted.newIndices.end() && it.key() == oldIndex; it++) {
-                        glm::vec4& weights = extracted.mesh.clusterWeights[it.value()];
-                    
+                        // expand the bone radius for vertices with at least 1/4 weight
+                        const float EXPANSION_WEIGHT_THRESHOLD = 0.25f;
+                        if (weight > EXPANSION_WEIGHT_THRESHOLD) {
+                            const glm::vec3& vertex = extracted.mesh.vertices.at(it.value());
+                            float proj = glm::dot(boneDirection, vertex - boneEnd);
+                            if (proj < 0.0f && proj > -boneLength) {
+                                joint.boneRadius = glm::max(joint.boneRadius, radiusScale * glm::distance(
+                                    vertex, boneEnd + boneDirection * proj));
+                            }
+                        }
+                        
                         // look for an unused slot in the weights vector
+                        glm::vec4& weights = extracted.mesh.clusterWeights[it.value()];
                         for (int k = 0; k < 4; k++) {
                             if (weights[k] == 0.0f) {
                                 extracted.mesh.clusterIndices[it.value()][k] = i;
@@ -1303,7 +1347,29 @@ FBXGeometry extractFBXGeometry(const FBXNode& node, const QVariantHash& mapping)
                 }
                 if (totalWeight > maxWeight) {
                     maxWeight = totalWeight;
-                    maxJointIndex = extracted.mesh.clusters.at(i).jointIndex;
+                    maxJointIndex = jointIndex;
+                }
+            }
+        } else {
+            int jointIndex = maxJointIndex;
+            FBXJoint& joint = geometry.joints[jointIndex];
+            glm::vec3 boneEnd = extractTranslation(inverseModelTransform * joint.bindTransform);
+            glm::vec3 boneDirection;
+            float boneLength;
+            if (joint.parentIndex != -1) {
+                boneDirection = boneEnd - extractTranslation(inverseModelTransform *
+                    geometry.joints[joint.parentIndex].bindTransform);
+                boneLength = glm::length(boneDirection);
+                if (boneLength > EPSILON) {
+                    boneDirection /= boneLength;
+                }
+            }
+            float radiusScale = extractUniformScale(joint.transform * firstFBXCluster.inverseBindMatrix);
+            foreach (const glm::vec3& vertex, extracted.mesh.vertices) {
+                float proj = glm::dot(boneDirection, vertex - boneEnd);
+                if (proj < 0.0f && proj > -boneLength) {
+                    joint.boneRadius = glm::max(joint.boneRadius, radiusScale * glm::distance(
+                        vertex, boneEnd + boneDirection * proj));
                 }
             }
         }
@@ -1397,8 +1463,9 @@ FBXGeometry readFBX(const QByteArray& model, const QByteArray& mapping) {
     return extractFBXGeometry(parseFBX(&modelBuffer), parseMapping(&mappingBuffer));
 }
 
-bool addMeshVoxelsOperation(VoxelNode* node, void* extraData) {
-    if (!node->isLeaf()) {
+bool addMeshVoxelsOperation(OctreeElement* element, void* extraData) {
+    VoxelTreeElement* voxel = (VoxelTreeElement*)element;
+    if (!voxel->isLeaf()) {
         return true;
     }
     FBXMesh& mesh = *static_cast<FBXMesh*>(extraData);
@@ -1408,13 +1475,13 @@ bool addMeshVoxelsOperation(VoxelNode* node, void* extraData) {
     const int VERTICES_PER_FACE = 4;
     const int VERTEX_COUNT = FACE_COUNT * VERTICES_PER_FACE;
     const float EIGHT_BIT_MAXIMUM = 255.0f;
-    glm::vec3 color = glm::vec3(node->getColor()[0], node->getColor()[1], node->getColor()[2]) / EIGHT_BIT_MAXIMUM;
+    glm::vec3 color = glm::vec3(voxel->getColor()[0], voxel->getColor()[1], voxel->getColor()[2]) / EIGHT_BIT_MAXIMUM;
     for (int i = 0; i < VERTEX_COUNT; i++) {
         part.quadIndices.append(part.quadIndices.size());
         mesh.colors.append(color);
     }
-    glm::vec3 corner = node->getCorner();
-    float scale = node->getScale();
+    glm::vec3 corner = voxel->getCorner();
+    float scale = voxel->getScale();
     
     mesh.vertices.append(glm::vec3(corner.x, corner.y, corner.z));
     mesh.vertices.append(glm::vec3(corner.x, corner.y, corner.z + scale));

@@ -44,7 +44,7 @@ public:
     void init();
     void reset();
     void simulate(float deltaTime, bool isMine);
-    void render(float alpha, bool isMine);
+    void render(float alpha, bool renderAvatarBalls);
     void renderMohawk();
 
     void setScale(float scale);
@@ -58,7 +58,7 @@ public:
     void setRenderLookatVectors(bool onOff) { _renderLookatVectors = onOff; }
     
     float getMousePitch() const { return _mousePitch; }
-    void  setMousePitch(float mousePitch) { _mousePitch = mousePitch; }
+    void setMousePitch(float mousePitch);
 
     glm::quat getOrientation() const;
     glm::quat getCameraOrientation () const;

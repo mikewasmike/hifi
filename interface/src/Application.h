@@ -22,6 +22,8 @@
 #include <NetworkPacket.h>
 #include <NodeList.h>
 #include <PacketHeaders.h>
+#include <ParticleCollisionSystem.h>
+#include <ParticleEditPacketSender.h>
 #include <VoxelQuery.h>
 
 #ifndef _WIN32
@@ -41,15 +43,16 @@
 #include "ViewFrustum.h"
 #include "VoxelFade.h"
 #include "VoxelEditPacketSender.h"
+#include "VoxelHideShowThread.h"
 #include "VoxelPacketProcessor.h"
 #include "VoxelSystem.h"
 #include "VoxelImporter.h"
 #include "avatar/Avatar.h"
 #include "avatar/MyAvatar.h"
 #include "avatar/Profile.h"
-#include "avatar/HandControl.h"
 #include "devices/Faceshift.h"
 #include "devices/SerialInterface.h"
+#include "devices/SixenseManager.h"
 #include "devices/Webcam.h"
 #include "renderer/AmbientOcclusionEffect.h"
 #include "renderer/GeometryCache.h"
@@ -62,6 +65,8 @@
 #include "ui/VoxelStatsDialog.h"
 #include "ui/RearMirrorTools.h"
 #include "ui/LodToolsDialog.h"
+#include "ParticleTreeRenderer.h"
+#include "ParticleEditHandle.h"
 
 class QAction;
 class QActionGroup;
@@ -115,7 +120,21 @@ public:
     void updateWindowTitle();
 
     void wheelEvent(QWheelEvent* event);
+
+    void shootParticle(); // shoots a particle in the direction you're looking
+    ParticleEditHandle* newParticleEditHandle(uint32_t id = NEW_PARTICLE);
+    ParticleEditHandle* makeParticle(glm::vec3 position, float radius, xColor color, glm::vec3 velocity, 
+            glm::vec3 gravity, float damping, QString updateScript);
     
+    void makeVoxel(glm::vec3 position,
+                   float scale,
+                   unsigned char red,
+                   unsigned char green,
+                   unsigned char blue,
+                   bool isDestructive);
+    
+    void removeVoxel(glm::vec3 position, float scale);
+        
     const glm::vec3 getMouseVoxelWorldCoordinates(const VoxelDetail _mouseVoxel);
     
     QGLWidget* getGLWidget() { return _glWidget; }
@@ -124,6 +143,7 @@ public:
     Camera* getCamera() { return &_myCamera; }
     ViewFrustum* getViewFrustum() { return &_viewFrustum; }
     VoxelSystem* getVoxels() { return &_voxels; }
+    ParticleTreeRenderer* getParticles() { return &_particles; }
     VoxelSystem* getSharedVoxelSystem() { return &_sharedVoxelSystem; }
     VoxelTree* getClipboard() { return &_clipboard; }
     Environment* getEnvironment() { return &_environment; }
@@ -136,6 +156,8 @@ public:
     Swatch*  getSwatch() { return &_swatch; }
     QMainWindow* getWindow() { return _window; }
     NodeToVoxelSceneStats* getVoxelSceneStats() { return &_voxelServerSceneStats; }
+    void lockVoxelSceneStats() { _voxelSceneStatsLock.lockForRead(); }
+    void unlockVoxelSceneStats() { _voxelSceneStatsLock.unlock(); }
     
     QNetworkAccessManager* getNetworkAccessManager() { return _networkAccessManager; }
     GeometryCache* getGeometryCache() { return &_geometryCache; }
@@ -150,11 +172,15 @@ public:
     static void controlledBroadcastToNodes(unsigned char* broadcastData, size_t dataBytes,
                                            const char* nodeTypes, int numNodeTypes);
     
-    void setupWorldLight(Camera& whichCamera);
+    void setupWorldLight();
 
+    void displaySide(Camera& whichCamera, bool selfAvatarOnly = false);
+    
     /// Loads a view matrix that incorporates the specified model translation without the precision issues that can
     /// result from matrix multiplication at high translation magnitudes.
     void loadTranslatedViewMatrix(const glm::vec3& translation);
+
+    const glm::mat4& getShadowMatrix() const { return _shadowMatrix; }
 
     /// Computes the off-axis frustum parameters for the view frustum, taking mirroring into account.
     void computeOffAxisFrustum(float& left, float& right, float& bottom, float& top, float& near,
@@ -172,6 +198,10 @@ public:
     glm::vec2 getViewportDimensions() const{ return glm::vec2(_glWidget->width(),_glWidget->height()); }
     NodeToJurisdictionMap& getVoxelServerJurisdictions() { return _voxelServerJurisdictions; }
     void pasteVoxelsToOctalCode(const unsigned char* octalCodeDestination);
+    
+    /// set a voxel which is to be rendered with a highlight
+    void setHighlightVoxel(const VoxelDetail& highlightVoxel) { _highlightVoxel = highlightVoxel; }
+    void setIsHighlightVoxel(bool isHighlightVoxel) { _isHighlightVoxel = isHighlightVoxel; }
 
 public slots:
     void sendAvatarFaceVideoMessage(int frameCount, const QByteArray& data);
@@ -215,12 +245,13 @@ private slots:
     void shrinkMirrorView();
     void resetSensors();
 
+
 private:
     void resetCamerasOnResizeGL(Camera& camera, int width, int height);
     void updateProjectionMatrix();
     void updateProjectionMatrix(Camera& camera, bool updateViewFrustum = true);
 
-    static bool sendVoxelsOperation(VoxelNode* node, void* extraData);
+    static bool sendVoxelsOperation(OctreeElement* node, void* extraData);
     static void processAvatarURLsMessage(unsigned char* packetData, size_t dataBytes);
     static void processAvatarFaceVideoMessage(unsigned char* packetData, size_t dataBytes);
     static void sendPingPackets();
@@ -242,6 +273,7 @@ private:
         glm::vec3& eyePosition);
     void updateHandAndTouch(float deltaTime);
     void updateLeap(float deltaTime);
+    void updateSixense(float deltaTime);
     void updateSerialDevices(float deltaTime);
     void updateThreads(float deltaTime);
     void updateMyAvatarSimulation(float deltaTime);
@@ -255,18 +287,22 @@ private:
     Avatar* findLookatTargetAvatar(const glm::vec3& mouseRayOrigin, const glm::vec3& mouseRayDirection,
         glm::vec3& eyePosition, QUuid &nodeUUID);
     bool isLookingAtMyAvatar(Avatar* avatar);
-                                
-    void renderLookatIndicator(glm::vec3 pointOfInterest, Camera& whichCamera);
+    
+    void renderLookatIndicator(glm::vec3 pointOfInterest);
     void renderFollowIndicator();
+    void renderHighlightVoxel(VoxelDetail voxel);
+    
     void updateAvatar(float deltaTime);
     void updateAvatars(float deltaTime, glm::vec3 mouseRayOrigin, glm::vec3 mouseRayDirection);
-    void queryVoxels();
+    void queryOctree(NODE_TYPE serverType, PACKET_TYPE packetType, NodeToJurisdictionMap& jurisdictions);
     void loadViewFrustum(Camera& camera, ViewFrustum& viewFrustum);
     
-    void displayOculus(Camera& whichCamera);
-    void displaySide(Camera& whichCamera, bool selfAvatarOnly = false);
+    glm::vec3 getSunDirection();
+    
+    void updateShadowMap();
     void displayOverlay();
     void displayStats();
+    void renderAvatars(bool forceRenderHead, bool selfAvatarOnly = false);
     void renderViewFrustum(ViewFrustum& viewFrustum);
    
     void checkBandwidthMeterClick();
@@ -274,11 +310,8 @@ private:
     bool maybeEditVoxelUnderCursor();
     void deleteVoxelUnderCursor();
     void eyedropperVoxelUnderCursor();
-    void injectVoxelAddedSoundEffect();
             
     void setMenuShortcutsEnabled(bool enabled);
-    
-    void updateCursor();
     
     static void attachNewHeadToNode(Node *newNode);
     static void* networkReceive(void* args); // network receive thread
@@ -318,6 +351,9 @@ private:
     VoxelImporter _voxelImporter;
     VoxelSystem _sharedVoxelSystem;
     ViewFrustum _sharedVoxelSystemViewFrustum;
+    
+    ParticleTreeRenderer _particles;
+    ParticleCollisionSystem _particleCollisionSystem;
 
     QByteArray _voxelsFilename;
     bool _wantToKillLocalVoxels;
@@ -337,6 +373,8 @@ private:
     
     Faceshift _faceshift;
     
+    SixenseManager _sixenseManager;
+    
     Camera _myCamera;                  // My view onto the world
     Camera _viewFrustumOffsetCamera;   // The camera we use to sometimes show the view frustum from an offset mode
     Camera _mirrorCamera;              // Cammera for mirror view
@@ -346,11 +384,11 @@ private:
     glm::mat4 _untranslatedViewMatrix;
     glm::vec3 _viewMatrixTranslation;
     
+    glm::mat4 _shadowMatrix;
+    
     Environment _environment;
     
     int _headMouseX, _headMouseY;
-    
-    HandControl _handControl;
     
     int _mouseX;
     int _mouseY;
@@ -390,6 +428,9 @@ private:
     glm::vec3 _lastMouseVoxelPos; // the position of the last mouse voxel edit
     bool _justEditedVoxel;        // set when we've just added/deleted/colored a voxel
 
+    VoxelDetail _highlightVoxel;
+    bool _isHighlightVoxel;
+    
     VoxelDetail _nudgeVoxel; // details of the voxel to be nudged
     bool _nudgeStarted;
     bool _lookingAlongX;
@@ -408,15 +449,6 @@ private:
     ChatEntry _chatEntry; // chat entry field 
     bool _chatEntryOn;    // Whether to show the chat entry 
     
-    ProgramObject* _oculusProgram;  // The GLSL program containing the distortion shader 
-    float _oculusDistortionScale;   // Controls the Oculus field of view
-    int _textureLocation;
-    int _lensCenterLocation;
-    int _screenCenterLocation;
-    int _scaleLocation;
-    int _scaleInLocation;
-    int _hmdWarpParamLocation;
-    
     GeometryCache _geometryCache;
     TextureCache _textureCache;
     
@@ -434,8 +466,10 @@ private:
     bool _stopNetworkReceiveThread;
     
     bool _enableProcessVoxelsThread;
-    VoxelPacketProcessor     _voxelProcessor;
-    VoxelEditPacketSender   _voxelEditSender;
+    VoxelPacketProcessor _voxelProcessor;
+    VoxelHideShowThread _voxelHideShowThread;
+    VoxelEditPacketSender _voxelEditSender;
+    ParticleEditPacketSender _particleEditSender;
     
     unsigned char _incomingPacket[MAX_PACKET_SIZE];
     int _packetCount;
@@ -456,12 +490,17 @@ private:
 
     PieMenu _pieMenu;
     
-    int parseVoxelStats(unsigned char* messageData, ssize_t messageLength, sockaddr senderAddress);
+    int parseOctreeStats(unsigned char* messageData, ssize_t messageLength, const HifiSockAddr& senderAddress);
+    void trackIncomingVoxelPacket(unsigned char* messageData, ssize_t messageLength,
+                                  const HifiSockAddr& senderSockAddr, bool wasStatsPacket);
     
     NodeToJurisdictionMap _voxelServerJurisdictions;
+    NodeToJurisdictionMap _particleServerJurisdictions;
     NodeToVoxelSceneStats _voxelServerSceneStats;
+    QReadWriteLock _voxelSceneStatsLock;
     
     std::vector<VoxelFade> _voxelFades;
+    std::vector<Avatar*> _avatarFades;
 };
 
 #endif /* defined(__interface__Application__) */

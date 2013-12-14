@@ -61,6 +61,12 @@ void setTranslation(glm::mat4& matrix, const glm::vec3& translation);
 
 glm::quat extractRotation(const glm::mat4& matrix, bool assumeOrthogonal = false);
 
+glm::vec3 extractScale(const glm::mat4& matrix);
+
+float extractUniformScale(const glm::mat4& matrix);
+
+float extractUniformScale(const glm::vec3& scale);
+
 double diffclock(timeval *clock1,timeval *clock2);
 
 void renderMouseVoxelGrid(const float& mouseVoxelX, const float& mouseVoxelY, const float& mouseVoxelZ, const float& mouseVoxelS);
@@ -70,8 +76,6 @@ void renderNudgeGrid(float voxelX, float voxelY, float voxelZ, float voxelS, flo
 void renderNudgeGuide(float voxelX, float voxelY, float voxelZ, float voxelS);
 
 void renderCollisionOverlay(int width, int height, float magnitude);
-
-void renderDiskShadow(glm::vec3 position, glm::vec3 upDirection, float radius, float darkness);
 
 void renderOrientationDirections( glm::vec3 position, const glm::quat& orientation, float size );
 

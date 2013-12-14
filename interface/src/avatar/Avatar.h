@@ -15,8 +15,6 @@
 
 #include <AvatarData.h>
 
-#include "AvatarTouch.h"
-#include "AvatarVoxelSystem.h"
 #include "Balls.h"
 #include "Hand.h"
 #include "Head.h"
@@ -100,7 +98,9 @@ enum DriveKeys {
     UP,
     DOWN,
     ROT_LEFT, 
-    ROT_RIGHT, 
+    ROT_RIGHT,
+    ROT_UP,
+    ROT_DOWN,
     MAX_DRIVE_KEYS
 };
 
@@ -139,7 +139,7 @@ public:
     void init();
     void simulate(float deltaTime, Transmitter* transmitter);
     void follow(Avatar* leadingAvatar);
-    void render(bool lookingInMirror, bool renderAvatarBalls);
+    void render(bool forceRenderHead);
 
     //setters
     void setDisplayingLookatVectors(bool displayingLookatVectors) { _head.setRenderLookatVectors(displayingLookatVectors); }
@@ -158,19 +158,17 @@ public:
     Hand& getHand() { return _hand; }
     glm::quat getOrientation() const;
     glm::quat getWorldAlignedOrientation() const;
-    AvatarVoxelSystem* getVoxels() { return &_voxels; }
 
     void getSkinColors(glm::vec3& lighter, glm::vec3& darker);
 
-    // Get the position/rotation of a single body ball
-    void getBodyBallTransform(AvatarJointID jointID, glm::vec3& position, glm::quat& rotation) const;
-
-    /// Checks for an intersection between the described ray and any of the avatar's body balls.
-    /// \param origin the origin of the ray
-    /// \param direction the unit direction vector
-    /// \param[out] distance the variable in which to store the distance to intersection
-    /// \return whether or not the ray intersected
-    bool findRayIntersection(const glm::vec3& origin, const glm::vec3& direction, float& distance) const;
+    /// Checks for penetration between the described sphere and the avatar.
+    /// \param penetratorCenter the center of the penetration test sphere
+    /// \param penetratorRadius the radius of the penetration test sphere
+    /// \param penetration[out] the vector in which to store the penetration
+    /// \param skeletonSkipIndex if not -1, the index of a joint to skip (along with its descendents) in the skeleton model
+    /// \return whether or not the sphere penetrated
+    bool findSpherePenetration(const glm::vec3& penetratorCenter, float penetratorRadius,
+        glm::vec3& penetration, int skeletonSkipIndex = -1);
 
     virtual int parseData(unsigned char* sourceBuffer, int numBytes);
 
@@ -207,7 +205,6 @@ protected:
     SkeletonModel _skeletonModel;
     bool _ballSpringsInitialized;
     float _bodyYawDelta;
-    AvatarBall _bodyBall[ NUM_AVATAR_BODY_BALLS ];
     AvatarMode _mode;
     glm::vec3 _velocity;
     glm::vec3 _thrust;
@@ -218,14 +215,12 @@ protected:
     float _scale;
     float _height;
     Balls* _balls;
-    AvatarTouch _avatarTouch;
     glm::vec3 _worldUpDirection;
     glm::vec3 _mouseRayOrigin;
     glm::vec3 _mouseRayDirection;
     bool _isCollisionsOn;
     Avatar* _leadingAvatar;
     float _stringLength;
-    AvatarVoxelSystem _voxels;
 
     bool _moving; ///< set when position is changing
 
@@ -234,7 +229,6 @@ protected:
     glm::vec3 getBodyUpDirection() const { return getOrientation() * IDENTITY_UP; }
     glm::vec3 getBodyFrontDirection() const { return getOrientation() * IDENTITY_FRONT; }
     glm::quat computeRotationFromBodyToWorldUp(float proportion = 1.0f) const;
-    void updateBodyBalls(float deltaTime);
     bool updateLeapHandPositions();
     void updateArmIKAndConstraints(float deltaTime, AvatarJointID fingerTipJointID);
     void setScale(const float scale);
@@ -253,8 +247,8 @@ private:
     
     // private methods...
     glm::vec3 calculateAverageEyePosition() { return _head.calculateAverageEyePosition(); } // get the position smack-dab between the eyes (for lookat)
-    float getBallRenderAlpha(int ball, bool lookingInMirror) const;
-    void renderBody(bool lookingInMirror, bool renderAvatarBalls);
+    float getBallRenderAlpha(int ball, bool forceRenderHead) const;
+    void renderBody(bool forceRenderHead);
     void initializeBodyBalls();
     void resetBodyBalls();
     void updateHandMovementAndTouching(float deltaTime, bool enableHandMovement);

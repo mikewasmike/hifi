@@ -109,6 +109,7 @@ void Head::init() {
 
 void Head::reset() {
     _yaw = _pitch = _roll = 0.0f;
+    _mousePitch = 0.0f;
     _leanForward = _leanSideways = 0.0f;
     
     if (USING_PHYSICAL_MOHAWK) {
@@ -230,6 +231,13 @@ void Head::simulate(float deltaTime, bool isMine) {
                 _rightEyeBlinkVelocity = 0.0f;
             }
         }
+        
+        // use data to update fake Faceshift blendshape coefficients
+        const float BROW_LIFT_SCALE = 500.0f;
+        const float JAW_OPEN_SCALE = 0.01f;
+        const float JAW_OPEN_DEAD_ZONE = 0.75f;
+        faceshift->updateFakeCoefficients(_leftEyeBlink, _rightEyeBlink, min(1.0f, _browAudioLift * BROW_LIFT_SCALE),
+            glm::clamp(sqrt(_averageLoudness * JAW_OPEN_SCALE) - JAW_OPEN_DEAD_ZONE, 0.0f, 1.0f), _blendshapeCoefficients);
     }
     
     // based on the nature of the lookat position, determine if the eyes can look / are looking at it.      
@@ -243,6 +251,7 @@ void Head::simulate(float deltaTime, bool isMine) {
     
     // the blend face may have custom eye meshes
     _faceModel.getEyePositions(_leftEyePosition, _rightEyePosition);
+
 }
 
 void Head::calculateGeometry() {
@@ -287,10 +296,11 @@ void Head::calculateGeometry() {
                            + up    * _scale * NOSE_UPTURN;  
 }
 
-void Head::render(float alpha, bool isMine) {
+void Head::render(float alpha, bool renderAvatarBalls) {
     _renderAlpha = alpha;
 
-    if (!(_videoFace.render(alpha) || _faceModel.render(alpha))) {
+    bool lookatVectorsVisible = _renderLookatVectors;
+    if (renderAvatarBalls) {
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_RESCALE_NORMAL);
         
@@ -301,9 +311,12 @@ void Head::render(float alpha, bool isMine) {
         renderMouth();
         renderNose();
         renderEyeBrows();
+    
+    } else if (!_videoFace.render(alpha)) {
+        lookatVectorsVisible &= _faceModel.render(alpha);
     }
-        
-    if (_renderLookatVectors) {
+    
+    if (lookatVectorsVisible) {
         renderLookatVectors(_leftEyePosition, _rightEyePosition, _lookAtPosition);
     }
 }
@@ -325,6 +338,10 @@ void Head::setScale (float scale) {
     }
 }
 
+void Head::setMousePitch(float mousePitch) {
+    const float MAX_PITCH = 90.0f;
+    _mousePitch = glm::clamp(mousePitch, -MAX_PITCH, MAX_PITCH);
+}
 
 void Head::createMohawk() {
     srand(time(NULL));

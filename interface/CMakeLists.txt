@@ -13,8 +13,8 @@ set(LIBOVR_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/LibOVR)
 set(LIBVPX_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/LibVPX)
 set(LEAP_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/Leap)
 set(MOTIONDRIVER_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/MotionDriver)
-set(PORTAUDIO_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/PortAudio)
 set(OPENCV_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/OpenCV)
+set(SIXENSE_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/Sixense)
 set(UVCCAMERACONTROL_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/UVCCameraControl)
 
 if (APPLE)
@@ -82,7 +82,9 @@ include(${MACRO_DIR}/LinkHifiLibrary.cmake)
 
 # link required hifi libraries
 link_hifi_library(shared ${TARGET_NAME} ${ROOT_DIR})
+link_hifi_library(octree ${TARGET_NAME} ${ROOT_DIR})
 link_hifi_library(voxels ${TARGET_NAME} ${ROOT_DIR})
+link_hifi_library(particles ${TARGET_NAME} ${ROOT_DIR})
 link_hifi_library(avatars ${TARGET_NAME} ${ROOT_DIR})
 link_hifi_library(audio ${TARGET_NAME} ${ROOT_DIR})
 
@@ -95,6 +97,7 @@ find_package(Leap)
 find_package(MotionDriver)
 find_package(OpenCV)
 find_package(OpenNI)
+find_package(Sixense)
 find_package(UVCCameraControl)
 find_package(ZLIB)
 
@@ -105,6 +108,22 @@ if (OPENNI_FOUND AND NOT DISABLE_OPENNI)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${OPENNI_INCLUDE_DIRS}")
     target_link_libraries(${TARGET_NAME} ${OPENNI_LIBRARIES})
 endif (OPENNI_FOUND AND NOT DISABLE_OPENNI)
+
+# likewise with Sixense library for Razer Hydra
+if (SIXENSE_FOUND AND NOT DISABLE_SIXENSE)
+    add_definitions(-DHAVE_SIXENSE)
+    include_directories(SYSTEM ${SIXENSE_INCLUDE_DIRS})
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${SIXENSE_INCLUDE_DIRS}")
+    target_link_libraries(${TARGET_NAME} ${SIXENSE_LIBRARIES})
+endif (SIXENSE_FOUND AND NOT DISABLE_SIXENSE)
+
+# and with LibOVR for Oculus Rift
+if (LIBOVR_FOUND AND NOT DISABLE_LIBOVR)
+    add_definitions(-DHAVE_LIBOVR)
+    include_directories(SYSTEM ${LIBOVR_INCLUDE_DIRS})
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${LIBOVR_INCLUDE_DIRS}")
+    target_link_libraries(${TARGET_NAME} ${LIBOVR_LIBRARIES})
+endif (LIBOVR_FOUND AND NOT DISABLE_LIBOVR)
 
 qt5_use_modules(${TARGET_NAME} Core Gui Multimedia Network OpenGL Svg WebKit WebKitWidgets)
 
@@ -120,7 +139,6 @@ include_directories(
   SYSTEM
   ${FACESHIFT_INCLUDE_DIRS} 
   ${GLM_INCLUDE_DIRS} 
-  ${LIBOVR_INCLUDE_DIRS}
   ${LIBVPX_INCLUDE_DIRS}
   ${LEAP_INCLUDE_DIRS}
   ${MOTIONDRIVER_INCLUDE_DIRS}
@@ -140,8 +158,6 @@ target_link_libraries(
 if (APPLE)
     # link in required OS X frameworks and include the right GL headers
     find_library(AppKit AppKit)
-    find_library(AudioToolbox AudioToolbox)
-    find_library(AudioUnit AudioUnit)
     find_library(CoreAudio CoreAudio)
     find_library(CoreServices CoreServices)
     find_library(Carbon Carbon)
@@ -157,9 +173,7 @@ if (APPLE)
     target_link_libraries(
         ${TARGET_NAME}
         ${AppKit}
-        ${AudioToolbox} 
-        ${AudioUnit} 
-        ${CoreAudio} 
+        ${CoreAudio}
         ${CoreServices} 
         ${Carbon}
         ${Foundation} 
@@ -169,7 +183,6 @@ if (APPLE)
         ${QTKit}
         ${QuartzCore}
         ${UVCCAMERACONTROL_LIBRARIES}
-        ${LIBOVR_LIBRARIES}
     )
     
     if (LEAP_FOUND)
@@ -193,24 +206,14 @@ if (WIN32)
         wsock32.lib
     )
 else (WIN32)
-  # link the PortAudio library
-  find_package(PortAudio REQUIRED)
-  include_directories(${PORTAUDIO_INCLUDE_DIRS})
-  target_link_libraries(${TARGET_NAME} ${PORTAUDIO_LIBRARIES})
-  
   # link required libraries on UNIX
   if (UNIX AND NOT APPLE) 
       find_package(Threads REQUIRED)
-      find_package(Librt REQUIRED)
-      find_package(ALSA)
-      find_package(Jack)
 
-      target_link_libraries(${TARGET_NAME}
-          ${CMAKE_THREAD_LIBS_INIT}
-          ${LIBRT_LIBRARIES}
-          ${JACK_LIBRARIES}
-          ${ALSA_LIBRARIES}
-          ${GLUT_LIBRARY}
+      target_link_libraries(
+        ${TARGET_NAME}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${GLUT_LIBRARY}
       )
   endif (UNIX AND NOT APPLE)
 endif (WIN32)

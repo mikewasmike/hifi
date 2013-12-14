@@ -10,8 +10,6 @@
 #include "AvatarData.h"
 #include <SharedUtil.h>
 
-// Glove flags
-#define GLOVE_FLAG_RAVE 0x01
 
 // When converting between fixed and float, use this as the radix.
 const int fingerVectorRadix = 4;
@@ -19,14 +17,19 @@ const int fingerVectorRadix = 4;
 HandData::HandData(AvatarData* owningAvatar) :
     _basePosition(0.0f, 0.0f, 0.0f),
     _baseOrientation(0.0f, 0.0f, 0.0f, 1.0f),
-    _owningAvatarData(owningAvatar),
-    _isRaveGloveActive(false),
-    _raveGloveEffectsMode(RAVE_GLOVE_EFFECTS_MODE_THROBBING_COLOR),
-    _raveGloveEffectsModeChanged(false)
+    _owningAvatarData(owningAvatar)
 {
     // Start with two palms
     addNewPalm();
     addNewPalm();
+}
+
+glm::vec3 HandData::worldPositionToLeapPosition(const glm::vec3& worldPosition) const {
+    return glm::inverse(_baseOrientation) * (worldPosition - _basePosition) / LEAP_UNIT_SCALE;
+}
+
+glm::vec3 HandData::worldVectorToLeapVector(const glm::vec3& worldVector) const {
+    return glm::inverse(_baseOrientation) * worldVector / LEAP_UNIT_SCALE;
 }
 
 PalmData& HandData::addNewPalm()  {
@@ -34,16 +37,56 @@ PalmData& HandData::addNewPalm()  {
     return _palms.back();
 }
 
+void HandData::getLeftRightPalmIndices(int& leftPalmIndex, int& rightPalmIndex) const {
+    leftPalmIndex = -1;
+    float leftPalmX = FLT_MAX;
+    rightPalmIndex = -1;    
+    float rightPalmX = -FLT_MAX;
+    for (int i = 0; i < _palms.size(); i++) {
+        const PalmData& palm = _palms[i];
+        if (palm.isActive()) {
+            float x = palm.getRawPosition().x;
+            if (x < leftPalmX) {
+                leftPalmIndex = i;
+                leftPalmX = x;
+            }
+            if (x > rightPalmX) {
+                rightPalmIndex = i;
+                rightPalmX = x;
+            }
+        }
+    }
+}
+
 PalmData::PalmData(HandData* owningHandData) :
+_rawRotation(0, 0, 0, 1),
 _rawPosition(0, 0, 0),
 _rawNormal(0, 1, 0),
+_rawVelocity(0, 0, 0),
+_rotationalVelocity(0, 0, 0),
+_controllerButtons(0),
 _isActive(false),
 _leapID(LEAPID_INVALID),
+_sixenseID(SIXENSEID_INVALID),
 _numFramesWithoutData(0),
-_owningHandData(owningHandData)
+_owningHandData(owningHandData),
+_isCollidingWithVoxel(false)
 {
     for (int i = 0; i < NUM_FINGERS_PER_HAND; ++i) {
         _fingers.push_back(FingerData(this, owningHandData));
+    }
+}
+
+void PalmData::addToPosition(const glm::vec3& delta) {
+    // convert to Leap coordinates, then add to palm and finger positions
+    glm::vec3 leapDelta = _owningHandData->worldVectorToLeapVector(delta);
+    _rawPosition += leapDelta;
+    for (int i = 0; i < getNumFingers(); i++) {
+        FingerData& finger = _fingers[i];
+        if (finger.isActive()) {
+            finger.setRawTipPosition(finger.getTipRawPosition() + leapDelta);
+            finger.setRawRootPosition(finger.getRootRawPosition() + leapDelta);
+        }
     }
 }
 
@@ -63,13 +106,6 @@ _owningHandData(owningHandData)
 int HandData::encodeRemoteData(unsigned char* destinationBuffer) {
     const unsigned char* startPosition = destinationBuffer;
 
-    unsigned char gloveFlags = 0;
-    if (isRaveGloveActive())
-        gloveFlags |= GLOVE_FLAG_RAVE;
-    
-    *destinationBuffer++ = gloveFlags;
-    *destinationBuffer++ = getRaveGloveMode();
-    
     unsigned int numHands = 0;
     for (unsigned int handIndex = 0; handIndex < getNumPalms(); ++handIndex) {
         PalmData& palm = getPalms()[handIndex];
@@ -116,8 +152,6 @@ int HandData::encodeRemoteData(unsigned char* destinationBuffer) {
 int HandData::decodeRemoteData(unsigned char* sourceBuffer) {
     const unsigned char* startPosition = sourceBuffer;
         
-    unsigned char gloveFlags = *sourceBuffer++;
-    char effectsMode = *sourceBuffer++;
     unsigned int numHands = *sourceBuffer++;
     
     for (unsigned int handIndex = 0; handIndex < numHands; ++handIndex) {
@@ -161,24 +195,12 @@ int HandData::decodeRemoteData(unsigned char* sourceBuffer) {
         palm.setActive(false);
     }
     
-    setRaveGloveActive((gloveFlags & GLOVE_FLAG_RAVE) != 0);
-    if (numHands > 0) {
-        setRaveGloveMode(effectsMode);
-    }
-    
     // One byte for error checking safety.
     unsigned char requiredLength = (unsigned char)(sourceBuffer - startPosition);
     unsigned char checkLength = *sourceBuffer++;
     assert(checkLength == requiredLength);
 
     return sourceBuffer - startPosition;
-}
-
-void HandData::setRaveGloveMode(int effectsMode) {
-    if (effectsMode != _raveGloveEffectsMode) {
-        _raveGloveEffectsModeChanged = true;
-    }
-    _raveGloveEffectsMode = effectsMode;
 }
 
 void HandData::setFingerTrailLength(unsigned int length) {

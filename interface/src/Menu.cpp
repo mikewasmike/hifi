@@ -36,11 +36,18 @@
 Menu* Menu::_instance = NULL;
 
 Menu* Menu::getInstance() {
+    static QMutex menuInstanceMutex;
+    
+    // lock the menu instance mutex to make sure we don't race and create two menus and crash
+    menuInstanceMutex.lock();
+    
     if (!_instance) {
         qDebug("First call to Menu::getInstance() - initing menu.\n");
         
         _instance = new Menu();
     }
+    
+    menuInstanceMutex.unlock();
         
     return _instance;
 }
@@ -60,8 +67,9 @@ Menu::Menu() :
     _voxelStatsDialog(NULL),
     _lodToolsDialog(NULL),
     _maxVoxels(DEFAULT_MAX_VOXELS_PER_SYSTEM),
-    _voxelSizeScale(DEFAULT_VOXEL_SIZE_SCALE),
-    _boundaryLevelAdjust(0)
+    _voxelSizeScale(DEFAULT_OCTREE_SIZE_SCALE),
+    _boundaryLevelAdjust(0),
+    _maxVoxelPacketsPerSecond(DEFAULT_MAX_VOXEL_PPS)
 {
     Application *appInstance = Application::getInstance();
     
@@ -72,7 +80,8 @@ Menu::Menu() :
                                   MenuOption::AboutApp,
                                   0,
                                   this,
-                                  SLOT(aboutApp()));
+                                  SLOT(aboutApp()),
+                                  QAction::AboutRole);
 #endif
     
     (addActionToQMenuAndActionHash(fileMenu,
@@ -120,7 +129,9 @@ Menu::Menu() :
                                   MenuOption::Quit,
                                   Qt::CTRL | Qt::Key_Q,
                                   appInstance,
-                                  SLOT(quit()));
+                                  SLOT(quit()),
+                                  QAction::QuitRole);
+                                  
     
     QMenu* editMenu = addMenu("Edit");
     
@@ -128,7 +139,8 @@ Menu::Menu() :
                                   MenuOption::Preferences,
                                   Qt::CTRL | Qt::Key_Comma,
                                   this,
-                                  SLOT(editPreferences()));
+                                  SLOT(editPreferences()),
+                                  QAction::PreferencesRole);
     
     addDisabledActionAndSeparator(editMenu, "Voxels");
     
@@ -243,6 +255,7 @@ Menu::Menu() :
                                            MenuOption::TurnWithHead,
                                            0,
                                            true);
+    addCheckableActionToQMenuAndActionHash(viewMenu, MenuOption::MoveWithLean, 0, false);
     addCheckableActionToQMenuAndActionHash(viewMenu, MenuOption::HeadMouse, 0, false);
     
     
@@ -267,6 +280,7 @@ Menu::Menu() :
                                   SLOT(cycleRenderMode()));
     
     addCheckableActionToQMenuAndActionHash(renderOptionsMenu, MenuOption::ParticleCloud, 0, false);
+    addCheckableActionToQMenuAndActionHash(renderOptionsMenu, MenuOption::Shadows, 0, false);
 
 
     QMenu* voxelOptionsMenu = developerMenu->addMenu("Voxel Options");
@@ -291,33 +305,19 @@ Menu::Menu() :
     addCheckableActionToQMenuAndActionHash(voxelOptionsMenu, MenuOption::DontFadeOnVoxelServerChanges);
     addActionToQMenuAndActionHash(voxelOptionsMenu, MenuOption::LodTools, Qt::SHIFT | Qt::Key_L, this, SLOT(lodTools()));
 
-    QMenu* cullingOptionsMenu = voxelOptionsMenu->addMenu("Culling Options");
-    addDisabledActionAndSeparator(cullingOptionsMenu, "Standard Settings");
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::OldVoxelCullingMode, 0,
-                                           false, this, SLOT(setOldVoxelCullingMode(bool)));
-
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::NewVoxelCullingMode, 0,
-                                           false, this, SLOT(setNewVoxelCullingMode(bool)));
-
-    addDisabledActionAndSeparator(cullingOptionsMenu, "Individual Option Settings");
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::DisableFastVoxelPipeline, 0,
-                                           false, appInstance->getVoxels(), SLOT(setDisableFastVoxelPipeline(bool)));
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::DisableHideOutOfView);
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::RemoveOutOfView);
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::UseFullFrustumInHide);
-    addCheckableActionToQMenuAndActionHash(cullingOptionsMenu, MenuOption::DisableConstantCulling);
-
+    QMenu* voxelProtoOptionsMenu = voxelOptionsMenu->addMenu("Voxel Server Protocol Options");
+    
+    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::DisableColorVoxels);
+    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::DisableLowRes);
+    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::DisableDeltaSending);
+    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::EnableVoxelPacketCompression);
+    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::EnableOcclusionCulling);
+    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::DestructiveAddVoxel);
 
     QMenu* avatarOptionsMenu = developerMenu->addMenu("Avatar Options");
     
     addCheckableActionToQMenuAndActionHash(avatarOptionsMenu, MenuOption::Avatars, 0, true);
-    addCheckableActionToQMenuAndActionHash(avatarOptionsMenu, MenuOption::AvatarAsBalls);
-    
-    addActionToQMenuAndActionHash(avatarOptionsMenu,
-                                  MenuOption::VoxelMode,
-                                  0,
-                                  appInstance->getAvatar()->getVoxels(),
-                                  SLOT(cycleMode()));
+    addCheckableActionToQMenuAndActionHash(avatarOptionsMenu, MenuOption::CollisionProxies);
     
     addActionToQMenuAndActionHash(avatarOptionsMenu,
                                   MenuOption::FaceMode,
@@ -357,11 +357,12 @@ Menu::Menu() :
                                            appInstance->getWebcam()->getGrabber(),
                                            SLOT(setDepthOnly(bool)));
 
-    QMenu* raveGloveOptionsMenu = developerMenu->addMenu("Rave Glove Options");
+    QMenu* raveGloveOptionsMenu = developerMenu->addMenu("Hand Options");
 
     addCheckableActionToQMenuAndActionHash(raveGloveOptionsMenu, MenuOption::SimulateLeapHand);
     addCheckableActionToQMenuAndActionHash(raveGloveOptionsMenu, MenuOption::DisplayLeapHands, 0, true);
-    addCheckableActionToQMenuAndActionHash(raveGloveOptionsMenu, MenuOption::TestRaveGlove);
+    addCheckableActionToQMenuAndActionHash(raveGloveOptionsMenu, MenuOption::LeapDrive, 0, false);
+ 
 
     QMenu* trackingOptionsMenu = developerMenu->addMenu("Tracking Options");
     addCheckableActionToQMenuAndActionHash(trackingOptionsMenu,
@@ -477,15 +478,9 @@ Menu::Menu() :
     addCheckableActionToQMenuAndActionHash(renderDebugMenu, MenuOption::CoverageMapV2, Qt::SHIFT | Qt::CTRL | Qt::Key_P);
                                            
     QMenu* audioDebugMenu = developerMenu->addMenu("Audio Debugging Tools");
-    addCheckableActionToQMenuAndActionHash(audioDebugMenu, MenuOption::EchoAudio);
-    
-    QMenu* voxelProtoOptionsMenu = developerMenu->addMenu("Voxel Server Protocol Options");
-    
-    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::SendVoxelColors);
-    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::LowRes);
-    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::DeltaSending);    
-    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::OcclusionCulling);
-    addCheckableActionToQMenuAndActionHash(voxelProtoOptionsMenu, MenuOption::DestructiveAddVoxel);
+    addCheckableActionToQMenuAndActionHash(audioDebugMenu, MenuOption::EchoServerAudio);
+    addCheckableActionToQMenuAndActionHash(audioDebugMenu, MenuOption::EchoLocalAudio);
+
 
     addCheckableActionToQMenuAndActionHash(developerMenu, MenuOption::ExtraDebugging);
     addActionToQMenuAndActionHash(developerMenu, MenuOption::PasteToVoxel, 
@@ -516,7 +511,8 @@ void Menu::loadSettings(QSettings* settings) {
     _fieldOfView = loadSetting(settings, "fieldOfView", DEFAULT_FIELD_OF_VIEW_DEGREES);
     _faceshiftEyeDeflection = loadSetting(settings, "faceshiftEyeDeflection", DEFAULT_FACESHIFT_EYE_DEFLECTION);
     _maxVoxels = loadSetting(settings, "maxVoxels", DEFAULT_MAX_VOXELS_PER_SYSTEM);
-    _voxelSizeScale = loadSetting(settings, "voxelSizeScale", DEFAULT_VOXEL_SIZE_SCALE);
+    _maxVoxelPacketsPerSecond = loadSetting(settings, "maxVoxelsPPS", DEFAULT_MAX_VOXEL_PPS);
+    _voxelSizeScale = loadSetting(settings, "voxelSizeScale", DEFAULT_OCTREE_SIZE_SCALE);
     _boundaryLevelAdjust = loadSetting(settings, "boundaryLevelAdjust", 0);
     
     settings->beginGroup("View Frustum Offset Camera");
@@ -545,6 +541,7 @@ void Menu::saveSettings(QSettings* settings) {
     settings->setValue("fieldOfView", _fieldOfView);
     settings->setValue("faceshiftEyeDeflection", _faceshiftEyeDeflection);
     settings->setValue("maxVoxels", _maxVoxels);
+    settings->setValue("maxVoxelsPPS", _maxVoxelPacketsPerSecond);
     settings->setValue("voxelSizeScale", _voxelSizeScale);
     settings->setValue("boundaryLevelAdjust", _boundaryLevelAdjust);
     settings->beginGroup("View Frustum Offset Camera");
@@ -679,7 +676,8 @@ QAction* Menu::addActionToQMenuAndActionHash(QMenu* destinationMenu,
                                              const QString actionName,
                                              const QKeySequence& shortcut,
                                              const QObject* receiver,
-                                             const char* member) {
+                                             const char* member,
+                                             QAction::MenuRole role) {
     QAction* action;
     
     if (receiver && member) {
@@ -688,6 +686,7 @@ QAction* Menu::addActionToQMenuAndActionHash(QMenu* destinationMenu,
         action = destinationMenu->addAction(actionName);
         action->setShortcut(shortcut);
     }
+    action->setMenuRole(role);    
     
     _actionHash.insert(actionName, action);
     
@@ -775,11 +774,7 @@ void Menu::editPreferences() {
     
     QFormLayout* form = new QFormLayout();
     layout->addLayout(form, 1);
-    
-    QLineEdit* avatarURL = new QLineEdit(applicationInstance->getAvatar()->getVoxels()->getVoxelURL().toString());
-    avatarURL->setMinimumWidth(QLINE_MINIMUM_WIDTH);
-    form->addRow("Avatar URL:", avatarURL);
-    
+        
     QString faceURLString = applicationInstance->getProfile()->getFaceModelURL().toString();
     QLineEdit* faceURLEdit = new QLineEdit(faceURLString);
     faceURLEdit->setMinimumWidth(QLINE_MINIMUM_WIDTH);
@@ -823,6 +818,16 @@ void Menu::editPreferences() {
     maxVoxels->setSingleStep(STEP_MAX_VOXELS);
     maxVoxels->setValue(_maxVoxels);
     form->addRow("Maximum Voxels:", maxVoxels);
+
+    QSpinBox* maxVoxelsPPS = new QSpinBox();
+    const int MAX_MAX_VOXELS_PPS = 6000;
+    const int MIN_MAX_VOXELS_PPS = 60;
+    const int STEP_MAX_VOXELS_PPS = 10;
+    maxVoxelsPPS->setMaximum(MAX_MAX_VOXELS_PPS);
+    maxVoxelsPPS->setMinimum(MIN_MAX_VOXELS_PPS);
+    maxVoxelsPPS->setSingleStep(STEP_MAX_VOXELS_PPS);
+    maxVoxelsPPS->setValue(_maxVoxelPacketsPerSecond);
+    form->addRow("Maximum Voxels Packets Per Second:", maxVoxelsPPS);
     
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     dialog.connect(buttons, SIGNAL(accepted()), SLOT(accept()));
@@ -852,16 +857,13 @@ void Menu::editPreferences() {
             DataServerClient::putValueForKey(DataServerKey::SkeletonURL,
                                              skeletonModelURL.toString().toLocal8Bit().constData());
         }
-        
-        QUrl avatarVoxelURL(avatarURL->text());
-        applicationInstance->getAvatar()->getVoxels()->setVoxelURL(avatarVoxelURL);
-        
-        Avatar::sendAvatarURLsMessage(avatarVoxelURL);
-        
+                        
         applicationInstance->getAvatar()->getHead().setPupilDilation(pupilDilation->value() / (float)pupilDilation->maximum());
         
         _maxVoxels = maxVoxels->value();
         applicationInstance->getVoxels()->setMaxVoxels(_maxVoxels);
+
+        _maxVoxelPacketsPerSecond = maxVoxelsPPS->value();
         
         applicationInstance->getAvatar()->setLeanScale(leanScale->value());
         
@@ -905,6 +907,9 @@ void Menu::goToDomain() {
             newHostname = domainDialog.textValue();
         }
         
+        // send a node kill request, indicating to other clients that they should play the "disappeared" effect
+        NodeList::getInstance()->sendKillNode(&NODE_TYPE_AVATAR_MIXER, 1);
+        
         // give our nodeList the new domain-server hostname
         NodeList::getInstance()->setDomainHostname(domainDialog.textValue());
     }
@@ -944,8 +949,11 @@ void Menu::goToLocation() {
             glm::vec3 newAvatarPos(x, y, z);
             
             if (newAvatarPos != avatarPos) {
+                // send a node kill request, indicating to other clients that they should play the "disappeared" effect
+                NodeList::getInstance()->sendKillNode(&NODE_TYPE_AVATAR_MIXER, 1);
+                
                 qDebug("Going To Location: %f, %f, %f...\n", x, y, z);
-                myAvatar->setPosition(newAvatarPos);
+                myAvatar->setPosition(newAvatarPos); 
             }
         }
     }
@@ -1123,30 +1131,3 @@ void Menu::updateFrustumRenderModeAction() {
     }
 }
 
-void Menu::setOldVoxelCullingMode(bool oldMode) {
-    setVoxelCullingMode(oldMode);
-}
-
-void Menu::setNewVoxelCullingMode(bool newMode) {
-    setVoxelCullingMode(!newMode);
-}
-
-/// This will switch on or off several different individual settings options all at once based on choosing with Old or New
-/// voxel culling mode.
-void Menu::setVoxelCullingMode(bool oldMode) {
-    const QString menus[] = { MenuOption::DisableFastVoxelPipeline, MenuOption::RemoveOutOfView, MenuOption::DisableHideOutOfView,
-                              MenuOption::UseFullFrustumInHide, MenuOption::DisableConstantCulling};
-    bool oldModeValue[]    = { true, true, true, true, true };
-    bool newModeValue[]    = { false, false, false, false, false };
-
-    for (int i = 0; i < sizeof(menus) / sizeof(menus[0]); i++) {
-        bool desiredValue = oldMode ? oldModeValue[i] : newModeValue[i];
-        if (isOptionChecked(menus[i]) != desiredValue) {
-            triggerOption(menus[i]);
-        }
-    }
-
-    // set the checkmarks accordingly...
-    _actionHash.value(MenuOption::OldVoxelCullingMode)->setChecked(oldMode);
-    _actionHash.value(MenuOption::NewVoxelCullingMode)->setChecked(!oldMode);
-}
