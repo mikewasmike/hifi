@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 
 project(hifi)
 
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} $ENV{QT_CMAKE_PREFIX_PATH})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} $ENV{QT_CMAKE_PREFIX_PATH} /opt/Qt5.1.1/5.1.1/gcc_64/lib/cmake)
 
 # set our Base SDK to 10.8
 set(CMAKE_OSX_SYSROOT /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.8.sdk)

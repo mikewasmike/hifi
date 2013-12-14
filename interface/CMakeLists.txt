@@ -153,7 +153,7 @@ target_link_libraries(
   ${MOTIONDRIVER_LIBRARIES}
   ${OPENCV_LIBRARIES} 
   ${ZLIB_LIBRARIES}
-)
+-lrt)
 
 if (APPLE)
     # link in required OS X frameworks and include the right GL headers
